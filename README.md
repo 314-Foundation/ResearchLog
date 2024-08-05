@@ -38,3 +38,105 @@ I've implemented and tested the Gumbel-softmax version of the convolutional laye
 Therefore the usefulness of GumbelConv2d seems pretty limited.
 
 I decided to implement the directions of the prototype parts in a different way, more straightforward. It's a simple two-layer convolutional network with a large MaxPool2d intermediate layer and my SoftMaxPool layer that implements differentiable disjunction. Both the accuracy and gradient interpretability are surprisingly high after the initial experiments. I'm excited to explore this direction.
+
+## 29.07.2024 - 05.08.2024
+
+This weeks work was all about clarification - of both ideas and the code. In particular I think that Prototypical Parts Networks have done their part - they inspired an interesting convolutional architectures. But the reliance of ProtoPNets on black-box feature extractors (which are hardly invertible) feels like too much of a stretch - in particular the produced explanations are [not faithful enough](https://arxiv.org/pdf/2302.08508) in the sense they don't reflect the model's actual decision process.
+
+I defined a new research goal I'd like to pursue in the following weeks: design an **accurate** neural network model with **interpretable gradients** on CIFAR10.
+
+### Accurate:
+At least 94% clean test accuracy (human-level performance).
+
+### Interpretable gradients:
+Input-space gradients of class logits are (after renormalization to RGB space):
+1. *perceptually aligned*, i.e. they resemble features meaningful of humans (e.g. objects with masked background)
+1. *accurate*, i.e. they represent features relevant to the given class (in particular they are different for different classes)
+1. *high-quality*, i.e. they capture fine-grained details of the features
+
+I've created a new repo specifically for CIFAR10. I've adapted the code from [this](https://github.com/KellerJordan/cifar10-airbench) repository to speed up experiments as much as possible. I've invited my friend as a collaborator.
+
+### Motivation
+
+Input level gradients are the most natural model explanation methods - they are theoretically motivated, easy to compute and reflect accurately the training process (backpropagation). However, gradients of SOTA models are [noisy](https://arxiv.org/abs/1706.03825) and hardly interpretable. Alternative feature attribution methods like [guided backpropagation](https://arxiv.org/abs/1412.6806) produce high-quality visaulizations but lack theoretical justification and raise serious concerns about their faithfullness (i.e. by not differentiating between classes), see [here](https://arxiv.org/abs/2104.06629).
+
+But is there really a need for better explanation tool than the good old class logit gradient? The existence of [adversarial examples](https://arxiv.org/abs/1312.6199) suggests that noisy gradients might in fact be faithful representation of model's unreliable decision process and not a mere artifact of oversensitivity.
+
+### Initial motivating results
+
+> NOTE: The following results are for two first classes of CIFAR10 (plane and car).
+
+Consider a simple model defined as follows (achieves 90% accuracy):
+
+```python
+nn.Sequential(
+    OrderedDict(
+        [
+            ("conv1", nn.Conv2d(cfg["n_channels"], 120, 10, stride=2, padding=0)),
+            ("amp1", nn.AdaptiveMaxPool2d((1, 1))),
+            ("flatten", nn.Flatten(1)),
+            ("bn1", nn.BatchNorm1d(120)),
+            ("mean", Mean(24)),
+            ("smpool", SoftMaxPool(cfg["n_classes"])),
+            ("scale", Scale()),
+        ]
+    )
+)
+```
+
+Intuitively this finds the maximal group (prototype) of `5 = 120 / 24` local features (5 prototype parts) that are all present on the image (hence it defines a disjunction over conjunctions of base features). This was directly inspired by my work on Prototype Networks.
+
+The learned filters are as follows (the groups of 5 consequtive features are clearly visible, the first 60 features are for plane, and the next 60 are for car).
+
+![image info](./docs/assets/disj_conj_features.png)
+
+
+For the 60 initial test images the gradients look like this:
+
+Plane:
+![image info](./docs/assets/disj_conj_plane.png)
+
+Clean images:
+![image info](./docs/assets/test.png)
+
+Car:
+![image info](./docs/assets/disj_conj_car.png)
+
+### Simple directional bias
+
+The Conjunction-Disjunction model looks promising but there is a clearly visible problem - we loose the spatial relations between parts. This inspires the following improved architecture which roughtly implements directional invariance (achieving 94% accuracy):
+
+```python
+nn.Sequential(
+    OrderedDict(
+        [
+            ("conv1", nn.Conv2d(cfg["n_channels"], 120, 10, stride=2, padding=0)),
+            ("mp1", nn.MaxPool2d(3)),
+            ("bn1", nn.BatchNorm2d(120)),
+            ("act1", nn.GELU()),
+            ("conv2", nn.Conv2d(120, 120, 4, stride=1)),
+            ("amp1", nn.AdaptiveMaxPool2d((1, 1))),
+            ("flatten", nn.Flatten(1)),
+            ("smpool", SoftMaxPool(cfg["n_classes"])),
+            ("scale", Scale()),
+        ]
+    )
+)
+```
+
+Let's take a look at the gradients:
+
+Plane:
+![image info](./docs/assets/directions_simple_plane.png)
+
+Clean images:
+![image info](./docs/assets/test.png)
+
+Car:
+![image info](./docs/assets/directions_simple_car.png)
+
+This looks much better but still there is a lot work to do. I think the next layer should be the GumbelConvolution.
+
+### GumbelConvolution
+
+The GumbelConvolution might be usefull here after all as it encodes an intuitive reasoning process. To recap, this is a Convolution with every kernel (output feature) attending to only one input channel per spatial dimension. GumbelConvolution requires more refined training procedure than I initially thought - we have to force the gumbel distribution to approximate more and more closely the one-hot vector as the training  progresses. This seems crucial for allowing the model to actually choose the one channel and may provide benefits - if not for accuracy, then probably for (gradient) interpretability.
