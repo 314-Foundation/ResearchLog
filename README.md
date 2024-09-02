@@ -140,3 +140,53 @@ This looks much better but still there is a lot work to do. I think the next lay
 ### GumbelConvolution
 
 The GumbelConvolution might be usefull here after all as it encodes an intuitive reasoning process. To recap, this is a Convolution with every kernel (output feature) attending to only one input channel per spatial dimension. GumbelConvolution requires more refined training procedure than I initially thought - we have to force the gumbel distribution to approximate more and more closely the one-hot vector as the training  progresses. This seems crucial for allowing the model to actually choose the one channel and may provide benefits - if not for accuracy, then probably for (gradient) interpretability.
+
+## 05.08.2024 - 12.08.2024
+
+Mostly technical week both in terms of code and defining proper learning strategy. I think I'm starting to make the GumbelConvolutions work but I'm not there yet. There are glimpses of interesting level of interpretability.
+
+## 12.08.2024 - 19.08.2024
+
+I'm convinced that GumbelConvolution + SoftMaxPool are the way to go. They allow for designing fully interpretable neural network architectures. A simple example is this:
+
+```python
+            ("conv1", nn.Conv2d(cfg["n_channels"], 120, 10, stride=1, padding=0)),
+            ("mp1", nn.MaxPool2d(5, padding=2, stride=10)),
+            ("bn1", nn.BatchNorm2d(120)),
+            ("act1", nn.GELU()),
+            ("conv3", GumbelConv(120, 60, 3, stride=1, hard=True)),
+            ("amp1", nn.AdaptiveMaxPool2d((1, 1))),
+            ("flatten", nn.Flatten(1)),
+            ("smpool", SoftMaxPool(cfg["n_classes"])),
+            ("scale", Scale()),
+```
+
+Every gumbel unit (output unit of the 3x3 GumbelConv) selects one input filter per spatial location. Every input filter is easily visualizable as it corresponds to a 10x10 image patch. The MaxPooling layer is designed so that patches don't overlap too much (to avoid obscure interactions of filters). To visualize the gumbel unit we compute its gradient on a few samples of Gaussian noise input images. Here is such a sample for gumbel unit no. 59:
+
+![image info](./docs/assets/gumbel_59.png)
+
+I think that gradient alignment on Gaussian noise is a way better tool for assessing model interpretability then gradient alignment of natural images. It has two benefits:
+- global interpretation of unit activation patterns (not dependent on particular input)
+- sanity check - as even simple edge detectors have very nice gradients on natural images
+
+Further work includes designing architectures with higher-resolution Gaussian-noise gradients, probably by stacking more GumbelConvolutions together.
+
+## 19.08.2024 - 26.08.2024
+
+I experimented with 3 layer GumbelConvolutions to make the gradients more detailed. The initial results prompted me to implement generalised version of GumbelConv - one that can look at more than 1 input channel per spatial dimension of the kernel. After some reading and thought I decided to implement it in a pretty straightforward way, sligthly changing the implementation of torch.nn.functional.gumbel_softmax to take topk elements instead of max. I have yet to test if this can help with improving the results.
+
+It's quite apparent that we need to find a proper bias-variance trade-off and the topk parameter seems to be a good candidate here. Small value of topk corresponds to a large inductive bias whereas large values to larger sensitivity of the filters. If the filters are oversensitive (high variance) then the gradients will be noisy; if they are biased then the gradients will be stable but not very expressive. Therefore it seems that we should aim to strike the balance between the stability and sensitity of network filters. Probably the bias should increase with the depth of the layer - lower layers should be more sensitive while deeper layers - more biased.
+
+The networks I'm considering are quite simple but the interpretability of 2 layer network suggests that there is something interesting going on (it's not trivial to make 2-layer network fully interpretable). If I can figure out how to increase the resolution and variance of gradients by adding more layers then I think I will essentially solve computer vision, which is quite exciting. On the other hand this observation alone might indicate that it can be a difficult step.
+
+## 26.08.2024 - 02.09.2024
+
+It seems that mixing more channels in the GumbelConv is NOT the way to go. I failed to make the networks more interpretable that way. The gradients are too noisy and don't encode enough inductive bias. These experiments suggests that standard ConvNets (which are a corner case of GumbelConvs) are just glorified edge detectors that do classification based on counting low-level structures (e.g. class-specific edges or textures) and hardly incorporate any high-level spatial correlations.
+
+I think I should experiment more with the ideas I developed in my recent paper, i.e. semantic features. I'm starting to see a general way of building white box neural network architectures. Basically an output unit of a layer should be a disjunction over the variants of the unit. Disjunction is implemented by SoftMaxPooling. The variants of the unit could be different types or poses of on object or a part of the object (i.e. a wheel of a car). To avoid just a few variants dominating the others we add a BatchNorm layer. Such a network basically performs clustering (every unit is an average of the training examples in its cluster). Now, every variant is itself a semantic feature as defined in my paper, i.e. it's MaxPooled over it's local variations (e.g. small translations of affine/projective transformations). Every variation of the variant is just a linear combination of lower-level features. In particular this can be a GumbelConvolution with just one input channel per spatial dimension. The lower-level layer is build in the same way. 
+
+For example a convolutional classifier consisting of 2 such layers could be interpreted as a disjunction over different variants of objects with every variant defining a spatial relations between parts; the parts are themselves disjunctions of their variants. The tricky part is to make the parts indeed encode the variants of the same semantic entity, e.g. the car should have wheels and the wheel should be a disjunction over various types of wheel.
+
+The parts of the objects in the CIFAR10 dataset should be invariant to small projective transformations, small scale changes and the change of colour palette (optionally different colors could be represented by different units). However I have an idea how to implement the semantic consistency of (variants of) parts in a more general way using standard augmentations and a form of self-supervised learning. Basically the activation of the object-level variants should be invariant over identity-preserving augmentations.
+
+The approach I'm taking here may seem complicated as I introduce several novel notions; however it's a pretty straightforward approach to neural networks and I can almost see a proof that it must work - I build shallow models but take extreme care for the interpretability. I'm almost afraid this approach is too straightforward to work well on harder problems and perhaps is a well-known folklore in the AI community but it's probably not - if one takes into account the disappointing state of academic research marred by the short-term optimisation for citations. The time and further experiments will tell. Anyway it's a fascinating adventure.
