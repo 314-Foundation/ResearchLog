@@ -190,3 +190,59 @@ For example a convolutional classifier consisting of 2 such layers could be inte
 The parts of the objects in the CIFAR10 dataset should be invariant to small projective transformations, small scale changes and the change of colour palette (optionally different colors could be represented by different units). However I have an idea how to implement the semantic consistency of (variants of) parts in a more general way using standard augmentations and a form of self-supervised learning. Basically the activation of the object-level variants should be invariant over identity-preserving augmentations.
 
 The approach I'm taking here may seem complicated as I introduce several novel notions; however it's a pretty straightforward approach to neural networks and I can almost see a proof that it must work - I build shallow models but take extreme care for the interpretability. I'm almost afraid this approach is too straightforward to work well on harder problems and perhaps is a well-known folklore in the AI community but it's probably not - if one takes into account the disappointing state of academic research marred by the short-term optimisation for citations. The time and further experiments will tell. Anyway it's a fascinating adventure.
+
+## 02.09.2024 - 09.09.2024
+
+This week I've been figuring out the implementation details as there are many moving parts in what I want to do and without proper hyperparameter alignment I could waste a lot of time on failed experiments. I think I got all of the details figured out and I'm ready to put it all together.
+
+Following up on the last weeks sketch of the proposed architecture here are the details:
+
+Object-part local biases (invariance over small local transformations of object parts):
+
+- fixed translations (this is for free in Conv2d + MaxPool2d)
+- fixed scale (we will scale the convolutional kernels to encode object-part scale invariance)
+- learnable perspective transforms (use [kornia.geometry.transform.warp_perspective](https://kornia.readthedocs.io/en/stable/geometry.transform.html#kornia.geometry.transform.warp_perspective) with learnable matrix; however only the M_{11} and M_{12} matrix coordinates should be learnable as they encode the rigid 3D perspective change; also the matrix M should be multiplied by translation matrices to center the perspective warp around the center of the image and not around the upper left corner)
+
+Object-part variants (non-local variants of object-parts) learned by self-supervision - keeping the maximal values of groups in the penultimate layer constant during training for the augmented variants of the input; we will use the following augmentations from [kornia.augmentation](https://kornia.readthedocs.io/en/latest/augmentation.module.html):
+- ColorJiggle
+- RandomChannelShuffle
+
+This will allow us to make most of the natural variants of parts activating the single unit in the first layer. Therefore the following layer can be a GumbelConv layer with just one input channel per spatial dimension. This will naturally boost interpretability and the expressive power while keeping the network architecture simple and entirery white box.
+
+The implementation will be based on the [sf_layers](https://github.com/314-Foundation/white-box-nn/blob/main/lib/modules/sf_layers.py) from my last paper, in particular on the ConvLayer. This is very exciting as it turns out that this work incidentally will be a direct continuation of the ideas developed in my paper but for CIFAR10 (which should be harder to dismiss than in the case of MNIST). The approach has matured a lot in the past months and a lot of technical machinery has been developed.
+
+## 09.09.2024 - 16.09.2024
+
+I've implemented the perspective and scale invariant convolutions. However the first results are disappointing - there is no substantial boost neither in interpretability nor in the accuracy.
+
+One day I've spontaneously revisited the past experiments and I've noticed that restraining weights of intermediate GumeblConvs to positive values considerably boosts interpretability (but slightly lowers accuracy). Today I also realised that I don't need GumbelConvs for that and standard Conv2d layers restricted to positive values also show this level of interpretability (provided that the penultimate layer is SoftMaxPool as before). My initial thoughts are that such training regime forces the positive decision process as well as favours weight sparsity - both seem to be relevant for interpretability.
+
+The gradients on test data look nice (gradients on the same inputs - towards cars and planes respectively):
+
+![image info](./docs/assets/positive_lenet_cars.png)
+
+![image info](./docs/assets/positive_lenet_planes.png)
+
+Gradients of units in the penultimate layer on noise look worse but are still intelligible:
+
+![image info](./docs/assets/positive_lenet_units.png)
+
+This looks to be the most promising direction for now.
+
+## 16.09.2024 - 23.09.2024
+
+This week I've been experimenting with positively-constrained convolutions. The constraint boosts gradient alignment of hidden units regardless of network depth which gives full insight into network actions (even if the gradients are computed on noise). This resembles the Guided Backpropagation but is more theoretically sound and faithful to the network's decision process. In particular I can experiment with the network architecture and get immediate insight into the effects of particular architectural choices. I can confirm that intermediate layers indeed learn consistent lower-level features.
+
+The general idea is this - use a positively constrained convolutional backbone to encode bias (local variations of objects) and the SoftMaxPool layer to pool over class variance (different objects within a class). The challenge is to boost the sensitivity to class variance and therefore to boost the accuracy. With interpretable gradients this should be just a matter of time. For example I discovered that it's crucial to disable the learned affine rescaling in BatchNormalization layers to effectively use all the available hidden units. The next idea I'm excited about is to (SoftMax)pool over different convolutional backbones as a single architecture seems to be bound to a particular object scale. The less exciting but more obvious one is to use more data augmentations but I will wait until I feel that I've run out of architectural ideas.
+
+I also need to do some refactoring as the approach has simplified over the last two weeks and I can cut off some parts of code while streamlining the others, in particular the ones responsible for gradient visualization. Current approach also allows me to easily scale to deeper architectures and therefore it's more and more important to move to GPU as the training time on my local machine becomes inconvenient (I try to avoid the overhead connected with working on remote machines but that becomes less and less effective). The refactoring will make the transition easier. Although the https://lightning.ai/ environment allows me to move to remote pretty seamlessly it used to be laggy in the past (but that might have improved in the meantime).
+
+## 23.09.2024 - 30.09.2024
+
+I noticed that the networks I train don't fully utilise the capacity of the first convolutional layer - there are always some dead units. I tried to fix that by adding some noise during training but to no avail. However this seems to be a minor problem and I think I've spent too much time on it.
+
+I started experiments on 3 classes and realised that setting affine=False in the last BatchNorm layer was important for two classes but for 3 classes it doesn't make a big difference - the results are even better with affine=True. This is a reminder that I should be wary not to overfit my findings to a particular oversimplified setting and test on harder problems sooner.
+
+I visualized activation patterns of all hidden layer units for a 4-layer VGG-like network with positively constrained convolutional weights and the results are underwhelming - the features are of really bad quality. I think this is not the problem with the visualization but rather with the architecture - the initial 3x3 convs produce a lot of noise and the next layers focus on low-level local signals instead of global patterns. Going deeper doesn't seem to be a good idea in terms of interpretability.
+
+The insights I made while inspecting gradients suggest that the architectures should be designed in a top-down manner - the last layer is the main organiser of the activation patterns. Lower layers just follow what the top one dictates and adding more lower layers doesn't bring too much value - 3 or even 2 layers should be enough. It's more important to focus on the design of the last layer, e.g. it can represent the entire image or just a smaller sliding window - the sliding window is more adequate for capturing smaller-scale objects. Thus it seems that the ensemble of different shallow models is the way to go.
