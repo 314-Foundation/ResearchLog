@@ -340,6 +340,10 @@ Thus want I think I can do is roughly this:
 - No catastrophic forgetting - by design (previous slots are not removed)
 - Works well even for very simple backbone architectures (we'll see but the "accuracy after slot update" can be high)
 - Can be made interpretable with the right backbone (as I've shown so far)
+- Ensemble of high-precision label detectors (slots)
+- Slots can be made invariant to arbitrary fixed input augmentations (similar to TTA)
+- Backbone should encode local invariance of objects (inductive bias)
+- Slots help the backbone to separate classes
 
 ## 18.11.2024 - 25.11.2024
 
