@@ -304,3 +304,47 @@ As a sidenote here, I've checked many ideas and different directions in the rece
 Even more formally, I have to balance the two complementary aspects of the learning procedure. The model obviously has to be expressive enough to separate points from different classes. On the other hand, it has to generalise i.e. glue together certain sets of points (with the help of the inductive bias). In particular, the diminishing returns I get from boosting the inductive bias in my architectures suggest that I should work more on their separation capabilities. I tried to do this before by playing with different variants of batch normalisation but now I think that this was unlikely to work - if a slot scores one input lower then the other incorrectly, then no form of normalisation will help (as this is a monotonic transformation). Instead of normalising the scores I should do something that can swap the incorrect ordering of scores. One of the most natural ideas is to do (input-weighted) subtraction.
 
 Indeed, restricting the convolutional weights to positive values boosted gradient alignment considerably but also reduced the expressive power. The aligned gradients are due to the resulting positive decision process and the induced sparsity of learned weights - both of them increase the stability of gradients across different inputs (including random noise). It's interesting to try to introduce more expressive power with the help of the negative decision process, while still retaining the gradient alignment. In other words, I could try to disentangle the positive and negative reasoning into separate branches and glue them together in a controlled way. Throwing in a non-linearity could probably boost the expressive power even when compared to the unrestricted convolutional networks, as the positive and negative branch won't be simply added together. I shall play around with this idea and see what happens.
+
+## 28.10.2024 - 04.11.2024:
+
+I added the negative decision process to the architecture. There is a slight improvement in accuracy but nothing substantial. Moreover, the gradients toward negative units are rather trivial - features that lower the score of a given class are simply the features that boost either of the remaining classes. Thus, I can see no substantial benefits to the interpretability; the negative component makes the network more complex and the benefits to the accuracy seem marginal.
+
+I might revisit this in the future but right now I'd like to explore the other thing I was excited about last week, i.e. to explore a 3-dimensional inductive bias. This might be a more appropriate approach after all as boosting the network's ability to separate points in a generic way generally contributes rather to better train memoization than to better generalisation.
+
+The objects in the CIFAR datasets are 3-dimensional therefore I think that the good inductive bias has to account for that. I plan to add a depth dimension to the learnable convolutional kernels, treating them as 3-dimensional template features - and simply project the 3D kernel to 2D kernel in a few different ways to achieve various views of the 3D kernel. Hence, the 3D kernel defines a set of 2D kernels but with intricately connected weights in a way that mirrors the connection of different views of a 3D object, which seems to be an appropriate bias here. I've already made sure that there are tools to do just that in the kornia library and I will do the first experiments soon.
+
+## 04.10.2024 - 11.11.2024:
+
+I don't have much to report this week. I've implemented the ProjectiveConv2d which encodes the 3D projective bias - as mentioned last week. The implementation was tricky in some places and took longer then expected but it should work ok now. I should be able to start the experiments tomorrow.
+
+## 11.11.2024 - 18.11.2024:
+
+I tested the ProjectiveConv2d. This approach offers many possibilities and I definitely haven't tested all of them - there are many ways to project a 3D representation on the 2D space. I decided to rotate the 3D representation along the x and y axis by a certain acute angle in 8 directions - this corresponds to shifting the viewpoint slightly to see the sides of the object.
+
+The results were inconsistent even across similar sets of parameters. Some offered slight improvements while others decreased the metrics. This approach also introduces significant overhead as it makes the training 8x slower. Inspecting the representations revealed that the 3D representation was mostly redundant as usually only one 2D view was relevant. Perhaps there are ways to make the 3D representation useful but I started to rethink my approach.
+
+From a certain perspective tweaking the inductive bias is just a technical detail. I realised that I need to focus on the larger picture. What I did so far is to design an interpretable neural hashing procedure. This is in it of itself a novel design that deserves better scrutiny. In particular, it naturally lends itself to a continual learning paradigm and inspires a different training procedure.
+
+Even if my method won't achieve good test time accuracy on CIFAR it can still excel in different areas. Doing interpretable continual compression of inflowing data with no catastrophic forgetting is actually a pretty exciting thing to do and I realised that this can be achieved by neural hashing. After the model encounters the new data it either assigns it to the matching slot or, if there is no good match, creates a new slot and expands its representation space.
+
+Instead of evaluating test-time accuracy I can propose a different metric - "accuracy after slot update", i.e. I will do one pass through the (unlabelled) test set and filter examples that aren't matched to any of the slots. I will then check the labels of those examples and add new corresponding slots to the network. Then I can compute the accuracy in the next pass. This setting seems better-suited for real-world scenarios than the standard train-test evaluation paradigm. Ideally, the amount of new slots should be low and the new metric I propose is this: how many new slots need to be added to achieve a desired accuracy.
+
+In essence, this is an assignment problem - every example in a batch of data has to be assigned to exactly one slot (existing or new one). Every slot has its assigned label. The goal is to make every slot a high-precision detector of the label. Therefore the entire layer becomes an ensemble of high-precision label detectors. If some examples are left unassigned then I create an appropriate new slot. We'll see how the implementation will go but I think I've figured out most details.
+
+Thus want I think I can do is roughly this:
+
+- Plug & Play module - can be applied to representation space of any backbone architecture (in place of the linear probe).
+- Easily detects out-of-distribution data (if no slot is matched)
+- Naturally robust to adversarial attacks (adversaries should be out-of-distribution)
+- Learns continually (slots are added incrementally)
+- No catastrophic forgetting - by design (previous slots are not removed)
+- Works well even for very simple backbone architectures (we'll see but the "accuracy after slot update" can be high)
+- Can be made interpretable with the right backbone (as I've shown so far)
+
+## 18.11.2024 - 25.11.2024
+
+Some good old programming this week - nothing too difficult but quite detailed. I've implemented the core functions for the incremental slot-matching mechanism. Have to wrap them up into procedures and do some code cleaning before I can run experiments.
+
+## 25.11.2024 - 02.12.2024
+
+The implementation turns out to be quite demanding. No part is particularly difficult but orchestrating them together requires a lot of care and foresight so that the resulting module is designed well enough to allow for flexible and robust experimentation. It even inspired some nice refactoring of the existing codebase. I think I'm almost there but certainly this takes longer than expected.
