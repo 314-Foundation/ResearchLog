@@ -352,3 +352,51 @@ Some good old programming this week - nothing too difficult but quite detailed. 
 ## 25.11.2024 - 02.12.2024
 
 The implementation turns out to be quite demanding. No part is particularly difficult but orchestrating them together requires a lot of care and foresight so that the resulting module is designed well enough to allow for flexible and robust experimentation. It even inspired some nice refactoring of the existing codebase. I think I'm almost there but certainly this takes longer than expected.
+
+## 02.12.2024 - 09.12.2024
+
+I've implemented most of the IncrementalNeuralHashing layer
+
+I've been really humbled by this task. Often I felt that my brain could use more working memory to grasp all the relevant details together so that the code is correct and concise and not an unmanageable mess. Proper understanding of what I really want to do at every step was crucial as it allowed me to simplify the implementation enough to actually carry it out. Even then every non-trivial line of code required careful scrutiny and longish variable names such as `thresholded_bs_scores_normalized` to keep track of things.
+
+In particular, the layer had to account for various backbones and input augmentations to allow for robust experimentation. Tensors had to be L2 normalised and unnormalised appropriately for proper threshold computation and efficient gradient propagation. The optimiser had to be re-initialised after every expansion of the weight matrix and therefore preferably stateless (so I chose the classic SGD without momentum - for this layer only). The weight matrix should be pruned after every epoch to eliminate dead slots. The slot-threshold estimation was a complex tensor-manipulation task on its own and now has to be fitted appropriately in the training loop. There were many other minor architectural/technical decisions I had to evaluate to make the resulting implementation reasonably straightforward and easy to work with.
+
+Things left to do, they seem quite basic:
+- select the unmatched examples (actually their variants with maximum norm), normalize them and treat them as potential new slots
+- compute their 100% precision thresholds on the current batch (treating them as class detectors) - this is tricky but I already have a function for this so it should be easy to fit in
+- select the minimal set of those slots as new slots
+- add the new slots to their respective classes
+- concat new slots with the old slots, replace the weight and the optimizer
+- check if the gradients are preserved; if not, redo the forward pass (don't optimise for performance just yet)
+- update other buffers: threshold, n_slots_per_class, n_slot_activations_per_epoch
+
+Plan for later:
+- test for bugs
+- test on MNIST and see how many slots are added after training
+- test the accuracy
+- add the minimum set of unmatched test examples as new slots and test the accuracy again (continual learnig)
+- test on CIFAR with the interpretable backbone
+- check hyperparams such as: 
+    - use (batch thresholds) vs (running averages of thresholds) during training (batch thresholds mean positive gradients only)
+    - MaxPool vs SoftMaxPool for pooling slot values along the classes
+    - initial values of layer params (such as scale)
+
+## 09.12.2024 - 17.12.2024
+
+I've finished implementing the IncrementalNeuralHashing layer, the class has ~300 lines of non-trivial tensor manipulation code and I'm really glad that this technical work is done. It should work fine as I tested relevant parts of the code along the way and the architecture is carefully thought out. Perhaps I should write some unit tests, but I don't want to postpone the experiments too much and such tests are non-that-trivial for tensors. I want to refactor the code a little by extracting a SlotMatcher class that would encapsulate some repetitive computations and make the code easier to use but that is quite straightforward now. It was really hard to wrap my mind around all the details and different scenarios (i.e. training, testing, detecting and adding new slots during training, detecting unmatched examples during eval etc.). I'm excited to start tests now.
+
+The layer should have a nice property - in the worst case it should memoize all the training examples. This would imply poor inductive bias of the backbone. The better the backbone inductive bias, the better the data compression done by the hashing layer. This would be the opposite of a linear layer that just computes an average of class representations in the worst case scenario (where one output unit dominates the others).
+
+## 17.12.2024 - 23.12.2024
+
+I've spent a few days refactoring but it was well worth it. The code got much cleaner, I understood the problem deeper and made some functional improvements. There were some minor bugs in the code but I think I fixed them all. The layer works as expected on MNIST but I'm not very far into experiments just yet (I use MNIST before CIFAR to get a better understanding of the behaviour of the proposed layer).
+
+More importantly I realised that the slot selection I'm performing is an instance of the classic "set cover problem". This allowed me to select much better sets of slots during training. I've re-implemented the well-known greedy approximation as matrix operation in Pytorch for even better performance.
+
+Somehow I feel it's a very good sign to have an NP-hard problem in the core of the proposed learning algorithm - intuitively speaking, learning *should* be computationally hard. In fact, learning can be indeed considered an instance of the set cover problem - you cover observations with the least possible amount of ideas. The fact that this rather philosophical observation is a consequence of technical work is pretty encouraging and it really feels I'm on to something interesting.
+
+## 23.12.2024 - 30.12.2024
+
+In the spare time I had during the holiday season I made more experiments, tests, thinking and some crucial technical improvements to the algorithm. This is the best piece of code I've ever written - I'm really proud to have captured all that complexity in an elegant and manageable way - the hard work has paid off. There's also a compelling theory behind all the stuff which I started to describe formally. The Preliminary experiments on MNIST suggest that it works just like I hoped it would - even the simplest architecture turns out to be accurate and interpretable despite minimal hyperparameter tweaking. I can also see that it can easily detect errors in data and got possible new insights to adversarial vulnerability. We'll see if this transfers to CIFAR. But even if it doesn't (which I find unlikely) I think I have enough material for a very interesting paper.
+
+I've also done some reading on [neural cirtuits](https://distill.pub/2020/circuits/) and sketched the introductory chapters of the paper (Introduction + Related Work) - this might be a little premature but I felt it was a good moment to take a little pause and look at a broader perspective before I dive back into technical work.
