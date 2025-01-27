@@ -400,3 +400,83 @@ Somehow I feel it's a very good sign to have an NP-hard problem in the core of t
 In the spare time I had during the holiday season I made more experiments, tests, thinking and some crucial technical improvements to the algorithm. This is the best piece of code I've ever written - I'm really proud to have captured all that complexity in an elegant and manageable way - the hard work has paid off. There's also a compelling theory behind all the stuff which I started to describe formally. The Preliminary experiments on MNIST suggest that it works just like I hoped it would - even the simplest architecture turns out to be accurate and interpretable despite minimal hyperparameter tweaking. I can also see that it can easily detect errors in data and got possible new insights to adversarial vulnerability. We'll see if this transfers to CIFAR. But even if it doesn't (which I find unlikely) I think I have enough material for a very interesting paper.
 
 I've also done some reading on [neural cirtuits](https://distill.pub/2020/circuits/) and sketched the introductory chapters of the paper (Introduction + Related Work) - this might be a little premature but I felt it was a good moment to take a little pause and look at a broader perspective before I dive back into technical work.
+
+## 30.12.2024 - 06.01.2025
+
+The training of the IncrementalNeuralHashing layer looks stable and robust to (sensible) hyperparameter choices. A simple 1-layer architecture "memoises" the train dataset in 998 units (~50x compression rate) and achieves 97.8% test accuracy on MNIST - while being fully interpretable. One can play around with various inductive biases and input-augmentations to achieve even better compression rate and test accuracy.
+
+One of such inductive biases is adding an appropriate convolutional layer (which will be the go-to idea on CIFAR). The interpretability can be preserved if the layer is designed appropriately (in particular, the stride of the MaxPool2d layer has to match the kernel size).
+
+I'm testing various ways to organize 2-layer neural hashing, optimising for the compression rate and interpretability of gradients. One of such ideas is making deeper slots (currently slots are just single layer weights, but in principle they can be arbitrarily deep parallel subnetworks, possibly of different architectures).
+
+## 06.01.2025 - 13.01.2025
+
+I figured out how to train the INH layer without supervision. Initially I thought that labels are essential to train INH properly (e.g. to estimate the thresholds) but I'm pretty sure this can be done without them - the rough idea is to combine INH with something similar to BatchNormalisation. I'm working out the details now; initial results are promising and seem to confirm my intuition.
+
+Unsupervised INH would be useful to train deeper models layer by layer while retaining the mechanistic interpretability of INH in every layer; in general it would be great for interpretable unsupervised clustering.
+
+## 13.01.2025 - 20.01.2025
+
+Did more experiments to figure out how to do the unsupervised INH exactly. BatchNormalisation indeed casts an interesting light here - adding normalisation changes the dynamics of learning so that the layer learns distinctive and more abstract features instead of simply memoising inputs. This improves expressive power and adds another avenue for generalisability (apart from architectural inductive bias).
+
+I also made sure that I can visualize RGB filters in a way that is scale-invariant but also sensitive to translation so that the explanations are well-defined (as my method normalises the inputs).
+
+Unsupervised slots learned without BatchNorm (averages of closely-matching examples):
+
+![image info](./docs/assets/inh.png)
+
+Unsupervised slots learned with BatchNorm (more abstract features):
+
+![image info](./docs/assets/inh_batch_norm.png)
+
+(The target architecture will operate on smaller image patches, these are just to help working out the details of the method)
+
+One of the most important takeaways seems to be the realisation that in the unsupervised case every input (a specific image patch from the sliding window) should be matched with exactly one slot. This isn't immediately obvious as examples generally consist of many distinctive features. But this should be addressed by stacking layers, i.e. the first convolutional layer captures single features-at-locations by sliding windows and the second captures specific arrangements of those features. Assigning more than one feature to one input in one layer seems difficult to do as it usually results in duplicated features.
+
+## 20.01.2025 - 27.01.2025
+
+It's a good moment to recap my work in the past weeks as I encountered many branching paths for further work and I need to make an informed decision on what to focus on next.
+
+My goal is to create an accurate and mechanistically interpretable [neural cirtuits](https://distill.pub/2020/circuits/) for CIFAR and MNIST (simple datasets to reduce the problem space). My definition for mechanistic interpretability is quite strong - I want the input-level gradients towards classes to be perceptually aligned and faithful, in particular I want them to be different for different classes on the same inputs. 
+
+Why gradients? Because they are straightforward to compute, visualise and motivate theoretically. Additionally, gradients of convolutions are computed by transposed convolutions which is a natural way to visualise the convolutional filters in deeper layers.
+
+I’ve been switching between the following aspects of neural network design, deepening my understanding and developing new ideas:
+
+- Intra-layer - horizontal interactions of neurons on a single input, i.e. pooling mechanisms, matching function (computing input-filter similarity, i.e. dot product or inverse L2 distance);
+- Batch-wise - various statistics of single neuron activation across many examples, i.e. batch normalization, selection of top k best matches;
+- Inter-layer - how to stack layers on each other to preserve interpretability of gradients, i.e. positively-constrained convolutions or Gumbel convolutions;
+
+My core idea are slots. They are the neurons in the last layer of the network (representation space). One slot should capture one variant of the input up to small local perturbations. Classes are (continuous) disjunctions over slots, i.e. input belongs to a class if its representation is similar to one of the slots in the class. Slots are similar to prototypes in ProtoPNets and are one of the tools to make the network more interpretable.
+
+Slots combine intra-layer (adequate class-wise slot pooling) and batch-wise (batch norm) interactions. By restricting slot input weights to positive values (inter-layer interaction) I managed to train 2-layer and 3-layer networks enjoying interpretable gradients on every layer on CIFAR. The accuracy wasn't satisfactory and also I felt that the quality of gradients could be improved. Also the same technique didn't seem to produce interpretable gradients on MNIST which was worrying.
+
+I tried many approaches, mostly different inductive biases or batch-wise regularisation. In particular I felt that I need more control over the batch-wise matching of the slots and therefore I developed the Incremental Neural Hashing mechanism (INH). Basically it computes batch-level thresholds and assignes inputs that are over this threshold to a particular slot. This gives me more control than Batch Normalisation, which simply normalises the slots over the batch.
+
+INH required a lot of technical work but turned out to work very well for 1-layer networks. However, training a 2-layer network with INH as the last layer was underwhelming; in particular, I couldn't achieve interpretability of the first layer, contrary to the case with BatchNorm as batch-wise regularizer. I think this is because INH tends to memoise inputs quickly, but the output of the previous layer is noisy at the beginning of training.
+
+That's why I looked at the possibility of training INH without supervision. This would allow me to train network layer-by-layer bottom up and thus solve the problem of noisy initial inputs. Instead of computing slot thresholds based on label distribution I tried to rely on the assumption that only X% of examples in the batch should be matched with the slot.
+
+This works well, the method learns meaningful features in the slots. I used it to learn most representative local patches in MNIST:
+
+![image info](./docs/assets/mnist_patches.png)
+
+and CIFAR:
+
+![image info](./docs/assets/cifar_patches.png)
+
+I also realised that my method of visualization of the kernel filters relies on the assumption that the input patches have approximately the same norm. While this is true for large image patches, it's incorrect for smaller ones. That's why I tested L2 convolutions which compute L2 similarity with the input instead of the dot product. Training L2 convolutions requires different initialization, larger learning rate and overall seems more difficult but is doable; L2 filters have more faithful interpretations for small RGB patches and probably are preferable for the initial layer of the network. Deeper layers can be forced to satisfy the similar norm assumption and therefore standard convolutions should be applicable.
+
+Therefore INH can learn the catalogue of local features in an entirely unsupervised way. The idea is then to use that catalogue of low-level features to learn higher-level features in a similar way.
+
+There are, however, potential problems with that. The following layer may explode, memoising too many features (I expect this to be the case for L2 convolutions). It also may not learn larger features at all and just repeat what the previous layer has learned (this might be the case for standard convolutions). I also rely on the assumption that there is just one feature in one patch which is not true for larger patches. This assumption can be dropped but it requires further engineering. Most importantly - I'm not sure what the ideal weights of the following layer should look like to preserve interpretability of gradients. It seems that I need to focus on the inter-layer aspect again.
+
+The problem space grows but I don't have the team to pursue all the branches at once and as always I try to choose the most promising one. It would be ideal to reduce the problem space again.
+
+Now, by accident I trained a simple 2-layer network on MNIST, almost a 2-layer MLP, that learned these features in the first layer:
+
+![image info](./docs/assets/mnist_mlp_features.png)
+
+They are particularly good-looking. Unfortunately, the gradients of the second layer units are not interpretable, even if I use slots as the representation space. But it feels like it should be possible to somehow constrain the weights of the second layer to make those interpretable. I mean - the first layer has learned clear parts, the slots in the second layer should just be sums of small sets of just a few parts, right? Perhaps some sparsity constraint would be enough?
+
+Anyway, this feels like a good problem to study for now - how to make gradients of second-layer neurons interpretable provided that the gradients of first layer neurons are interpretable?
