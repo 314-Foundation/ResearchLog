@@ -443,7 +443,7 @@ Why gradients? Because they are straightforward to compute, visualise and motiva
 
 I’ve been switching between the following aspects of neural network design, deepening my understanding and developing new ideas:
 
-- Intra-layer - horizontal interactions of neurons on a single input, i.e. pooling mechanisms, matching function (computing input-filter similarity, i.e. dot product or inverse L2 distance);
+- Intra-layer - lateral interactions of neurons on a single layer, i.e. pooling mechanisms, matching function (computing input-filter similarity, i.e. dot product or inverse L2 distance);
 - Batch-wise - various statistics of single neuron activation across many examples, i.e. batch normalization, selection of top k best matches;
 - Inter-layer - how to stack layers on each other to preserve interpretability of gradients, i.e. positively-constrained convolutions or Gumbel convolutions;
 
