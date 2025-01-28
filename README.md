@@ -457,11 +457,21 @@ INH required a lot of technical work but turned out to work very well for 1-laye
 
 That's why I looked at the possibility of training INH without supervision. This would allow me to train network layer-by-layer bottom-up and thus solve the problem of noisy initial inputs. Instead of computing slot thresholds based on label distribution I tried to rely on the assumption that only X% of examples in the batch should be matched with the slot.
 
-This works well, the method learns meaningful features in the slots. I used it to learn most representative local patches in MNIST:
+This works well, the method learns meaningful features in the slots. I used it to learn most representative local patches: 
+
+MNIST patches using cosine similarity:
+
+![image info](./docs/assets/mnist_patches_cosine.png)
+
+MNIST patches using L2 similarity:
 
 ![image info](./docs/assets/mnist_patches.png)
 
-and CIFAR:
+CIFAR patches using cosine similarity:
+
+![image info](./docs/assets/cifar_patches_cosine.png)
+
+CIFAR patches using L2 similarity:
 
 ![image info](./docs/assets/cifar_patches.png)
 
