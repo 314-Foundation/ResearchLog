@@ -490,3 +490,43 @@ Now, by pure accident, I trained a simple 2-layer network on MNIST - almost a 2-
 They are particularly good-looking. Unfortunately, the gradients of the second layer units are not interpretable, even if I use slots as the representation space. But it feels like it should be possible to somehow constrain the weights of the second layer to make those interpretable. I mean - the first layer has learned clear parts, the slots in the second layer should just encode small sets of just a few parts, right? Perhaps some sparsity constraint would be enough?
 
 Anyway, this feels like a good problem to study for now - how to make gradients of second-layer neurons interpretable provided that the gradients of first layer neurons are interpretable?
+
+## 27.01.2025 - 03.02.2025
+
+It finally clicked, I've got a great idea, working out the implementation details now but the overall vision is clear. It looks like we've been using convolutions wrong all along.
+
+## 03.02.2025 - 10.02.2025
+
+Mostly pen and paper work this week, I've written down the rough formula for my architecture. I've clarified it enough to implement it efficiently. Contrary to the standard feedforward layer stacking my approach is inherently recursive (not to be confused with recurrent networks) and actually a top-down computation. The implementation itself will help me clarify it further.
+
+I've lost some working time because of flu but it's ok now.
+
+## 10.02.2025 - 17.02.2025
+
+I've simplified the initial implementation of my idea. It can be thought of as nested input unfolding and then folding it again while applying convolutional filters along the way. This is a multi-layer architecture but every layer operates on the input-level, making it straightforward to interpret. It's a little tricky to implement in full generality with many spatial locations of nested sliding windows - so for now I'm assuming that the windows of every layer cover most of the input image - and hope that these large filters will naturally learn to focus on parts of the image. Even if this is too optimistic, coding the simpler architecture first will greatly help to implement the go-to version.
+
+The idea looks very promising in theory and should have been tested empirically already but my mind seems to work slower recently. I've had a big headache for few a days this week - a lot of stress unrelated to the research and apparently I haven't fully recovered from the flu.
+
+## 17.02.2025 - 24.02.2025
+
+I've finally implemented the architecture and can start experimenting. The entire multi-layer network can be interpreted as a set of adaptive filters applied to the input. This looks very optimistic and fits well with my previous research directions; in particular, with slots/neural hashing/ensemble of detectors - which allows for straightforward test-time training. The novelty is in the way the spatial bias is exploited by the subsequent layers but the slot mechanism remains the same.
+
+My recent headaches are probably due to elevated blood pressure. I may have overdone the workload in the past months. I need to take it easier in the coming weeks. But I feel that the research is wrapping up nicely and I can already see the outlines of the coming paper - assuming that the experiments will go as the theory seems to indicate.
+
+## 24.02.2025 - 03.03.2025
+
+The simplified implementation turns out to be rather expensive computationally. This is due to constructing very large tensors during nested (un)folding. The go-to version should be faster. Despite that the experiments are promising and align well with the theory and my expectations.
+
+The main takeaway is that the nested filters should not overlap spatially. This can be approximated by additional regularisation loss or restricting certain weights to positive values. This approach works for MNIST (after some hyperparameter tweaking), the network indeed learns to factorise the data into parts (layer 1) ...
+
+![image info](./docs/assets/mnist_nested_layer1.png)
+
+... that are later assembled into structures (layer 2):
+
+![image info](./docs/assets/mnist_nested_layer2.png)
+
+The network learns objects as different assemblies of parts; this makes the model fully interpretable globally (in input-independent fashion).
+
+On CIFAR the mentioned regularisations don't work well and therefore I need to employ the architectural constraint, i.e. implement the go-to version of my architecture, which has to be done anyway for performance reasons. It's almost done now.
+
+Overall it looks like I have all the tools required to build accurate and mechanistically interpretable deep neural networks for computer vision, I just need to put them together.
