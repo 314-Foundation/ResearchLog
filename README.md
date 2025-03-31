@@ -530,3 +530,49 @@ The network learns objects as different assemblies of parts; this makes the mode
 On CIFAR the mentioned regularisations don't work well and therefore I need to employ the architectural constraint, i.e. implement the go-to version of my architecture, which has to be done anyway for performance reasons. It's almost done now.
 
 Overall it looks like I have all the tools required to build accurate and mechanistically interpretable deep neural networks for computer vision, I just need to put them together.
+
+## 03.03.2025 - 10.03.2025
+
+This week I took time to contemplate the essence of my solution and what exactly makes it different from the standard feed-forward convolutional layer stacking. On the first glance the nested input unfolding is just a more expensive way to scan for hierarchical spatial features as it makes the same computations many times in different contexts (nested windows) and intuitively can be viewed as just changing the order of operations. Therefore I suspected that my solution might be equivalent to standard layer stacking with some additional constraints. I tried some natural ideas but I failed, it seems that the training dynamics are different after all, which would be good.
+
+My working theory is that the hidden units in feed-forward networks tend to learn superpositions of features, i.e. one output unit can respond to many loosely connected patterns in the previous layer (e.g. imagine two features: one activates the first half of lower-layer neurons, and the other activates the other half. Then a single higher-level unit can learn to activate on both of those features, mostly thanks to the activation function that squashes the information from the previous layer). This boosts the expressive power of such a unit but also obfuscates its activation pattern as the input-space gradients of the recognised features may interfere destructively, making the features difficult to recover after training. In general, the pure feed-forward architecture seems to have no good mechanism to enforce meaningful lateral feature interaction, in particular to discourage random feature overlap (destructive interference) and encourage feature specialisation.
+
+My solution is designed to avoid this destructive feature interference and ecnourage feature specialisation. The features are embedded in the (unfolded) input-space, which forces the feature gradients to interfere constructively to match the input pattern. I'm not sure how to recreate this mechanism using standard layer stacking, it might be possible using some trick from linear algebra but I'm not aware of such. Therefore I'm sticking to the nested layer unfolding.
+
+These considerations have led me to delay the implementation of the final version of my architecture. Even though I have all the details written down on paper, the actual implementation turns out to be quite tedious. However, I should be able to start new experiments soon.
+
+## 10.03.2025 - 17.03.2025
+
+My intuition from last week turned out to be correct as I figured out how to translate my nested architecture to standard feedforward layer stacking. This is all based on a simple, yet seemingly underrated Lemma:
+
+> Let N be a neural network in which every layer is either linear, ReLU or MaxPool. Additionally, suppose there are no bias terms in linear layers. Let u_n(x) be the value of some unit u_n in the n-th layer on input x. Then the u_n(x) is equal to the scalar product of x with the gradient of u_n(x) in x (wherever it's defined).
+
+It's easily proven by induction on n (layer depth).
+
+This is magnificent in the context of interpretability. It allows me to implement all the recent insights efficiently and stay relatively close to the existing architectures. In particular, it will be interesting to see how ReLU layers affect interpretability (as they are arguably the main source of feature superposition).
+
+## 17.03.2025 - 24.03.2025
+
+Experiments are going very well. I easily recreated the results for nested filters, training is much faster and the architecture more natural and modifiable. It's interesting to see how many details are needed to achieve the interpretability, changing a single design decision results in messy neuron activation patterns. However, those design decisions are well-motivated, so there seems to be no accident here.
+
+My idea is essentially a self-supervised regularisation loss that enforces interpretability. I train the backbone network using this loss and the linear classification head on top of it. I can optionally detach the classification head during training to see how well the self-supervised training separates the classes. I observed the following fascinating phenomenon:
+
+> The more interpretable the backbone neurons are, the less the classification head overfits. This connection seems to be very clear, if the backbone neurons have messy gradients, then the head behaves randomly on test data (while fitting well to train). If the gradients are slightly interpretable, then the test performance of the head is somehow better. The best test performance is achieved for the backbone with clearly interpretable neurons. This phenomenon disappears if the classification gradients are allowed to flow through the backbone during training (i.e. the classification head is not detached from the gradient graph).
+
+Other observations include:
+- the ReLU activation indeed introduces superposition, i.e. ReLU-units complicate the gradients of the deeper units; in particular, next-layer units resemble a disjunction over features. I'm not sure how to inspect the activation patterns of such units faithfully. Initial experiments (and theory) suggest that ReLU units may not be that important after all and could be used more sparingly without damaging netowrk performance;
+- by default, I activate only one neuron in the backbone representation space - this essentially makes the backbone a hashing function that memoises inputs up to the architectural inductive bias. I realised I can loosen this assumption without damaging interpretability - to boost the accuracy and generalisation power. Namely, I can activate more than one neuron in the last layer. Then the interpretations of units become more and more similar to more general features rather than particular data examples.
+- The regularisation I use for interpretability recreates the input. It's important to standarise the similarity to allow the network (to learn) to ignore the background.
+
+## 24.03.2025 - 31.03.2025
+
+Recent insights lead me back to the Gumbel/Positive/Disj_Conj Convolutions I explored a few months ago. I understand them much better now. In particular:
+
+- methods that resulted in more interpretable gradients are essentially doing the same thing - preventing gradient interference. Standard networks tend to focus on directions (linear combinations of hidden unit activations) instead of particular units. To achieve unit interpretability, activations have to be adequately constricted, i.e. spatially for vision. Roughly speaking, there should be only one feature per location (per particular layer on particular input). More precisely - convolutions should encode conjunction of disjunctions-at-locations, which is something in-between Gumbel and Positive Convolutions I explored before.
+- thanks to the Lemma I mentioned in 10.03.-17.03 update I view the standard network layers as adaptive spatial filters; it's refreshing to examine different layers in this context, for example the BatchNorm layer can be understood as performing two essential regularisations:
+    1. spreading the activations across all the units in a layer (preventing the layer to collapse just to few dominant units);
+    2. modifying the gradient flow so that it encourages the features to distinguish between examples (instead of just resembling parts of the examples);
+- I don’t need the additional reconstruction loss as I understand better how standard loss flows through the network and how high-level features are learned. In particular, I walk away from the hashing paradigm and don’t try to memoize the inputs in the representation layer. Instead, this layer should learn high-level features that separate the classes. In particular, one input can activate more than one feature in the representation space, increasing network capacity.
+
+The preliminary experiments seem to confirm these intuitions, i.e. disjunctions-at-locations indeed boost the interpretability significantly. I checked it in the scenarios that were easy to implement in a non-differentiable manner, i.e. first two layers and the representation layer. In principle the approach should work for any layer but it requires differentiable implementation to allow learning. I already have an idea how to do this, it's a pretty low-level concept as it modifies the scalar product itself - but makes a lot of sense theoretically. There might be some difficulty with proper choice of hyperparameters but I'm quite optimistic.
+
