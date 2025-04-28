@@ -576,3 +576,38 @@ Recent insights lead me back to the Gumbel/Positive/Disj_Conj Convolutions I exp
 
 The preliminary experiments seem to confirm these intuitions, i.e. disjunctions-at-locations indeed boost the interpretability significantly. I checked it in the scenarios that were easy to implement in a non-differentiable manner, i.e. first two layers and the representation layer. In principle the approach should work for any layer but it requires differentiable implementation to allow learning. I already have an idea how to do this, it's a pretty low-level concept as it modifies the scalar product itself - but makes a lot of sense theoretically. There might be some difficulty with proper choice of hyperparameters but I'm quite optimistic.
 
+## 31.03.2025 - 7.04.2025
+
+I'm getting closer and closer to building robust mechanistically interpretable neural networks. My core idea is replacing activation function with differentiable disjunction. This has the following core benefits:
+
+- activation function is layer-global while differentiable disjunction is neuron-specific, i.e. different output neurons can "activate" the input (output of the previous layer) in different ways; This boosts the expressive power of the network;
+- activation function kills some gradients (e.g. for negative values in case of ReLU) which makes it problematic to interpret neuron activation patterns faithfully; Neural disjunction doesn't kill any gradients, which allows to faithfully inspect every neuron activation on every input.
+
+Overall I'm leaning toward the following definition of mechanistic interpretability of neural networks:
+
+Definition:
+> Network is mechanistically interpretable if input level gradients of every unit are perceptually aligned for every input.
+
+Neural disjunction is straightforward to interpret mechanistically. Notice that standard networks perform two basic logical operations: AND and NOT. Taking a scalar product with a vector of weights (of an output unit) is maximised along the direction of this vector, therefore the unit can be considered a (weighted) conjunction of lower-level features. The NOT gate is implemented simply by weighting the input coordinate by a negative value. However, there is no natural way to encode OR gates in neural networks. Theoretically it could be implemented by the De Morgan Law: OR(A, B) = NOT(AND(NOT A, NOT B)). Although AND(NOT A, NOT B) can be fulfilled by a single layer, the topmost negation requires an additional layer. Also AND(NOT A, NOT B) is negative if A and B are positive, so we need an activation function that preserves high negative values, which generally is a problem (e.g. for ReLU networks it is plainly impossible).
+
+This drawback is partially alleviated by the activation functions - if A and B don't occur together and at least one of them is always suppressed, then AND(A, B) is maximised by either A or B and therefore can be interpreted as OR(A, B). This assumption however is pretty strong. Also, we can never really know if such a unit encodes conjunction or disjunction of A and B, at least not by analysing the network weights - we'd need a deeper knowledge about the data distribution, which generally is infeasible.
+
+It's hard to expect neural networks to be mechanistically interpretable if they cannot encode disjunction of features in a natural way. Perhaps this is the reason for noisy gradients, vulnerability to adversarial attacks and overall difficulty in interpreting models.
+
+My solution overcomes those problems by replacing activation functions with neural disjunction. In this week I tested several hyperparameter choices (i.e. how to implement the neural disjunction exactly) to achieve adequate gradient flow during training. I've done it for the Linear layer and it works great. The next step is to do this for Conv2d. In general I want to use neural disjunction (OR) along the channels while using standard neural conjunction (AND) along the spatial locations of the convolutional filter. This would result in a naturally interpretable layer, i.e. "[(this OR this OR ...) at this location] AND [(this OR this OR ...) at this location] AND ...". This would avoid the gradient interference of different units in the same spatial location which should produce perceptually aligned gradients in the visual domain.
+
+This all really makes sense theoretically and the experiments so far are very promising.
+
+## 7.04.2025 - 14.04.2025
+
+The experiments are going well, the only problem is that my implementation of neural disjunction is slow even on GPU. This is because I need to reimplement the scalar product with some twist and I do it in PyTorch. It seems I'd need to implement it in C and CUDA kernel.
+
+## 14.04.2025 - 21.04.2025
+
+I wrote the theoretical part of the paper. My approach is to explain networks by their gradient fields. I adopt the axiomatic approach, introducing the predicate Expl and 3 axioms of gradient field explainability - motivated by intuitive definition of an explainable gradient field. Then, using those axioms, I introduce 2 novel neural operators (XAND and ExplOR) that provably preserve gradient field explainability. The goal is to show that those 2 kinds of neurons suffice to build performant models.
+
+## 21.04.2025 - 28.04.2025
+
+I explored several methods to reduce the computational cost of ExplOR neuron (formerly called neural disjunction) using existing PyTorch interfaces before jumping into writing the custom CUDA kernel. The main bottleneck is the need to copy the input d times, where d is the number of output neurons, i.e. the memory bottleneck. I optimised the architecture to use existing pytorch operators as much as possible. Then I tried using vmap to vectorise the function across the batch of d output neurons; this helped a lot but this is still an order of magnitude too slow. Then I realised that ExplOR looks like a special case of attention operator, i.e. `torch.nn.functional.scaled_dot_product_attention`, and this is highly optimised. However, translating ExplOR to attention requires building big diagonal tensors via `torch.diag_embed` and this is again the memory bottleneck. However, this means that it will be much easier to write custom CUDA kernels as I can take the existing `scaled_dot_product_attention` implementation and modify it slightly so that the `diag_embed` is not needed.
+
+In the meantime I made some improvements to the theoretical part of the paper.
