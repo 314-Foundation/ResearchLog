@@ -611,3 +611,25 @@ I wrote the theoretical part of the paper. My approach is to explain networks by
 I explored several methods to reduce the computational cost of ExplOR neuron (formerly called neural disjunction) using existing PyTorch interfaces before jumping into writing the custom CUDA kernel. The main bottleneck is the need to copy the input d times, where d is the number of output neurons, i.e. the memory bottleneck. I optimised the architecture to use existing pytorch operators as much as possible. Then I tried using vmap to vectorise the function across the batch of d output neurons; this helped a lot but still is an order of magnitude too slow. Then I realised that ExplOR looks like a special case of attention operator, i.e. `torch.nn.functional.scaled_dot_product_attention`, and this is highly optimised. However, translating ExplOR to attention requires building big diagonal tensors via `torch.diag_embed` and that again is the memory bottleneck. But this means that it will be much easier to write custom CUDA kernels as I can take the existing `scaled_dot_product_attention` implementation and modify it slightly so that the `diag_embed` is not needed.
 
 In the meantime I made some improvements to the theoretical part of the paper.
+
+## 28.04.2025 - 05.05.2025
+
+This week, I started exploring how to write a custom C++/CUDA kernel in PyTorch to speed up ExplOR. While promising, the process turned out to be quite complex. Fortunately, after revisiting the problem, I found a way to implement the function efficiently in pure PyTorch. By slightly adjusting the formulation and leveraging logarithmic properties, I was able to use a standard einsum operation instead. This is a great outcome, as it saves significant time and effort otherwise needed for writing and testing a custom kernel.
+
+## 05.05.2025 - 12.05.2025
+
+This week, I decided to move away from the axiomatic framing of ExplOR and instead present it as a novel activation function with multiple benefits. The revised perspective highlights its expressive power: it generalizes ReLU and MaxPool, allowing for more output neurons than inputs. Functionally, it can be seen as a fusion of ReLU, MaxPool, BatchNorm, and a special case of attention, while remaining differentiable and efficient. At its core, the operation is a dot product in tropical algebra, with certain twists to improve training dynamics. It can optionally preserve the Gradient Representation Property and ensure no input gradients are entirely zeroed out on any input. Importantly, its expressiveness makes it a strong candidate for use with sparse linear layers, enhancing interpretability. I've implemented the necessary PyTorch modules, carefully handling all the required technical details.
+
+## 12.05.2025 - 19.05.2025
+
+Experiments are going very well. I think I will be able to achieve compelling results on much harder datasets than previously expected.
+
+## 19.05.2025 - 26.05.2025
+
+- Added learnable weights to ExplOR, allowing it to represent weighted disjunctions, in contrast to standard linear/convolutional layers that implement weighted conjunctions.
+- This structure enables networks composed of alternating weighted OR and weighted AND layers, allowing filters to be interpreted as logical formulas representing combinations of atomic features.
+- Due to distributivity, final activations can be interpreted as disjunctions of conjunctions — i.e., logical expressions in disjunctive normal form (DNF). Therefore, every network feature can be interpreted globally as maximum (disjunction) over certain set of conjunctions (sums) of atomic features (low-level filters). The particular compound feature selected for a given input is equal to the input-level gradient of the feature. Therefore it is optimal that the atomic features are separated spatially to avoid interference of co-occurring features.
+- Ran tests on simple networks to probe optimal hyperparameter ranges. Notable findings:
+    - BatchNorm significantly improves gradient quality and smoothens the loss landscape.
+    - Surprisingly, zero initialization gave the best results for logits.
+- Integrated MaxPool2d into ExplOR, making it learnable and improving spatial inductive bias.
