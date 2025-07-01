@@ -633,3 +633,76 @@ Experiments are going very well. I think I will be able to achieve compelling re
     - BatchNorm significantly improves gradient quality and smoothens the loss landscape.
     - Surprisingly, zero initialization gave the best results for logits.
 - Integrated MaxPool2d into ExplOR, making it learnable and improving spatial inductive bias.
+
+## 26.05.2025 - 02.06.2025
+
+This week, my main focus remained on finding the optimal way to combine ExplOR layers with sparse linear layers. Continued experimentation helped clarify the underlying theory, which also led to a refactoring of the code.
+
+In particular, I realized that interpreting a linear layer as an AND operation is inaccurate — a more appropriate analogue for AND would be a softmin or a -logsumexp(-x) function. A linear layer is simply a weighted sum, so the analogy to logical formulas does not hold.
+
+Instead, I’m converging on the idea that the theoretical core of my work should be the local exclusion constraint: the assumption that the input is structured as a set of locations, and that at each location only one feature can be active at a time (i.e. for a fixed input). On the philosophical sidenote: This constraint may in fact define the space itself in physics — or at least the "space" understood as the way the brain organises its inputs.
+
+Viewed this way, the ExplOR2d layer becomes a direct implementation of the local exclusion constraint as a neural network layer. This framing not only simplifies the theoretical side of the paper but also narrows down the space of architectures and hyperparameters I need to consider.
+
+## 02.06.2025 - 09.06.2025
+
+Further improvements to both the theory and the implementation technicalities. I found a neat formalisation in terms of (weakly) indpependent variables and therefore I might return to the first principles approach to interpretability. Implementation-wise I'm discovering how to stack ExplOR layers to make the best out of them.
+
+I've noticed that scaling the logits before applying softmax has a crucial impact. I'm computing something similar to attention over input features, and I need to scale both the input features and the weights before calculating the combined attention scores. There's an interesting trade-off here: if the input scale is larger than the weight scale, ExplOR behaves similarly to Top-k activation — it activates only the largest inputs and is relatively insensitive to the output neuron's weights. Conversely, if the weight scale is larger, ExplOR acts like a neuron with sparse weights. When the scales are comparable, we get a behavior somewhere between Top-k and sparse weights — the output neuron attends to a set of input neurons in an input-dependent way, which is more robust than either of the corner-cases.
+
+## 09.06.2025 - 16.06.2025
+
+I'm beginning to understand the core rules of how to build multi-layer networks with high-quality interpretable gradients. Main take-aways:
+
+- Gradient Representation Property is essential, i.e. enforcing f(x) = <grad f(x), x> for every neuron. This is possible thanks to the key-value structure of ExplOR, the inherent tropical bias in EplOR and a novel activation function SiLUBatchNorm. In this way we can preserve the input-level alignment while accounting for the bias in data and different scales of input neurons.
+- Local Exclusion Constraint is crucial for deeper layers, i.e. every output filter should locally attend to a sparse number of input filters per input. This regularises the backward pass, forcing layers to combine information in a comprehensible way. This can be implemented by spatial ExplOR2d.
+- Features from disjoint locations can be assumed to be mutually independent and therefore no constraint is needed for integrating information from separate locations (i.e. Convolutions with appropriate dilation).
+- ExplOR uses an additional set of weights ("logits") that perform soft subset selection. This allows the output neurons to focus on different sets of input features. Those sets can be initialized with a novel "dobble activation" function. The initial sets can be large as they are further refined by multiplying with the neuron's weight.
+- The inclusion of relatively constant (but still learnable) logits increases the biological plausibility of the architecture (logits can be interpreted as physical neural connections while weights - as the strengths of those connections).
+- Overall, the Location-independence and Local Exclusion seem to be good candidates for axioms for explainability-preserving neurons. This corresponds to how humans tend to represent the data as distributed spatially (features-at-locations).
+- To ground the axioms of explainable filters we'll assume that affine filters are explainable. However, they are not the only "primitive" explainable filters - we will be basing on the empirical fact that lower layers of most neural networks are usually explainable. The explainability-preserving neurons (abiding to the Local Exclusion principle) will be defined in deeper layers.
+- The ExplOR is indeed an input-dependent attention over the neuron-dependent subset of input features. It selects (in a soft manner) a dominating activation but only among the neuron-dependent subset of activations. Thus it is more robust then mere TopK activation selection or a sparse weight, but functionally, on a given input, this behaves like a TopK activation and a sparse weight at the same time. This makes it effectively sparse but still easy to train
+- Therefore, I don't really need a XAND layer (with learnable sparse weights) as ExplOR is already a more robust implementation of such a layer.
+- I observed that the best results require logits >> (normed inputs), i.e. that the architectural bias dominates the variance in data (this makes sense for proper discrimination of output neurons via different selected subsets of input neurons).
+
+## 16.06.2025 - 23.06.2025
+
+This week, there has been a significant development in my research. I've done ablations and it turns out I can achieve interpretability in a much simpler way. Specifically, I developed an activation function that can be dropped in most architectures, rendering it way more interpretable while preserving its performance.
+
+For example, these are the visualizations of what a modified VGG13 network looks at when recognizing the particular class of CIFAR10 (for first 3 classes, plane, car and bird):
+
+![image info](./docs/assets/vgg_13.png)
+
+The modified network achieves similar performance as the standard one. I'm refining a compelling theory of why this is indeed a faithful representation of the network's decision process for a given input x and the given label.
+
+My plans for further work include training at least VGG and ResNet networks (possibly also ViT) on CIFAR10 and on some harder dataset, for example Imagenette, to show off that the drop-in module and the corresponding theory work at scale.
+
+## 23.06.2025 - 30.06.2025
+
+This week's results frankly blew my mind. After further ablations I realised I can generate perfectly aligned and coherent counterfactual examples on any input on most PRETRAINED networks. I can use the same method to visualise faithfully network's decision process.
+
+Sample images from ResNet50 pretrained on ImageNet (with simple modification to gradient flow, with no retraining):
+
+Base:
+
+![image info](./docs/assets/base.png)
+
+Gradients:
+
+![image info](./docs/assets/gradients.png)
+
+Counterfactuals toward "church":
+
+![image info](./docs/assets/church.png)
+
+Diff "church" - original:
+
+![image info](./docs/assets/church_diff.png)
+
+Counterfactual toward "ostrich":
+
+![image info](./docs/assets/ostrich.png)
+
+The gradients and counterfactuals of the original network using the same technique looks like noise.
+
+To explain this phenomenon I dived deeper into neural network theory and I can show compelling arguments why neural networks become kernel machines during training. This means that neural nets become linear in the appropriately chosen feature space during training, arguably early on. This explains why these visualisations are possible and even fundamental for the network's decision process.
