@@ -706,3 +706,15 @@ Counterfactual toward "ostrich":
 The gradients and counterfactuals of the original network using the same technique looks like noise.
 
 To explain this phenomenon I dived deeper into neural network theory and I can show compelling arguments why neural networks become kernel machines during training. This means that neural nets become linear in the appropriately chosen feature space during training, arguably early on. This explains why these visualisations are possible and even fundamental for the network's decision process.
+
+## 30.06.2025 - 14.07.2025
+
+I've improved my method and done experiments on other ReLU architectures (resnext50_32x4d, inception_v3, vgg11_bn, densenet121) and it works just as well; preliminary experiments on architectures using SiLU and GELU are also promising but I'm leaving those out of the scope of the paper. I've been refining the theoretical part relentlessly to show that my method of aligning gradients is indeed faithful to the network's decision process, as this gives the whole new depth to the explanations I'm producing. I'm happy with the result, it's not a full formal proof but still pretty convincing and concise semi-formal arguments. Thus I've completed the sketch of the paper, i.e. how the formal presentation will go, which visualisations to include etc. and I can proceed to write it all up for the first, lean version of the paper.
+
+## 14.07.2025 - 21.07.2025
+
+It's going well. I should be able to publish the paper by next week.
+
+## 21.07.2025 - 31.07.2025
+
+The paper is publicitly available at [https://arxiv.org/abs/2507.22832](https://arxiv.org/abs/2507.22832)
